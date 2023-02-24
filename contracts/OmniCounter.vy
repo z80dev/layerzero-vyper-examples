@@ -1,9 +1,8 @@
 counter: public(uint256)
 
-# filler implementation of _blockingLzReceive
-# body is just a `pass` statement
 @internal
-def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+def _nonblockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+    # contract body upon cross-chain call goes here
     self.counter += 1
 
 # increment counter on other chain by calling _lzSend
@@ -19,21 +18,59 @@ def incrementCounter(_dstChainId: uint16):
 
 PAYLOAD_SIZE: constant(uint256) = 128
 CONFIG_SIZE: constant(uint256) = 512
+failedMessages: public(HashMap[uint16, HashMap[Bytes[40], HashMap[uint64, bytes32]]])
+
+event MessageFailed:
+    _srcChainId: uint16
+    _srcAddress: Bytes[40]
+    _nonce: uint64
+    _payload: Bytes[PAYLOAD_SIZE]
+    _reason: Bytes[1024]
+
+
+event RetryMessageSuccess:
+    _srcChainId: uint16
+    _srcAddress: Bytes[40]
+    _nonce: uint64
+    _payloadHash: bytes32
+
+# filler implementation of _blockingLzReceive
+# body is just a `pass` statement
+@internal
+def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+    # call self via raw_call with revert_on_failure=False and max_outsize=256
+    # raw_call signature is pasted below
+    # raw_call(to: address, data: Bytes, max_outsize: int = 0, gas: uint256 = gasLeft, value: uint256 = 0, is_delegate_call: bool = False, is_static_call: bool = False, revert_on_failure: bool = True)→ Bytes[max_outsize]
+    success: bool = False
+    data: Bytes[256] = b""
+    success, data = raw_call(self, concat(0x66ad5c8a, _abi_encode(_srcChainId, _srcAddress, _nonce, _payload)), max_outsize=256, revert_on_failure=False)
+    if not success:
+        self._storeFailedMessage(_srcChainId, _srcAddress, _nonce, _payload)
+
+# implementation of _storeFailedMessage
+@internal
+def _storeFailedMessage(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+    payloadHash: bytes32 = keccak256(_payload)
+    self.failedMessages[_srcChainId][_srcAddress][_nonce] = payloadHash
+    log MessageFailed(_srcChainId, _srcAddress, _nonce, _payload, convert("Failed to send payload", Bytes[100]))
+
+@external
+def nonblockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+    assert msg.sender == self, "ONLYSELF"
+    self._nonblockingLzReceive(_srcChainId, _srcAddress, _nonce, _payload)
 
 interface ILayerZeroReceiver:
-    def lzReceive(srcChainId: uint16, srcAddress: Bytes[32], nonce: uint64, payload: Bytes[PAYLOAD_SIZE]): nonpayable
-
-implements: ILayerZeroReceiver
+    def lzReceive(srcChainId: uint16, srcAddress: Bytes[40], nonce: uint64, payload: Bytes[PAYLOAD_SIZE]): nonpayable
 
 interface ILayerZeroEndpoint:
-    # def send(dstChainId: uint16, destination: Bytes[32], payload: Bytes[1024], refundAddress: address, zroPaymentAddress: address, adapterParams: Bytes[1024]): payable
-    def receivePayload(srcChainId: uint16, srcAddress: Bytes[32], dstAddress: address, nonce: uint64, gasLimit: uint256, payload: Bytes[PAYLOAD_SIZE]): nonpayable
-    def getInboundNonce(srcChainId: uint16, srcAddress: Bytes[32]) -> uint64: view
+    # def send(dstChainId: uint16, destination: Bytes[40], payload: Bytes[CONFIG_SIZE], refundAddress: address, zroPaymentAddress: address, adapterParams: Bytes[CONFIG_SIZE]): payable
+    def receivePayload(srcChainId: uint16, srcAddress: Bytes[40], dstAddress: address, nonce: uint64, gasLimit: uint256, payload: Bytes[PAYLOAD_SIZE]): nonpayable
+    def getInboundNonce(srcChainId: uint16, srcAddress: Bytes[40]) -> uint64: view
     def getOutboundNonce(dstChainId: uint16, srcAddress: address) -> uint64: view
     def estimateFees(dstChainId: uint16, userApplication: address, payload: Bytes[PAYLOAD_SIZE], payInZRO: bool, adapterParam: Bytes[CONFIG_SIZE]) -> (uint256, uint256): view
     def getChainId() -> uint16: view
-    def retryPayload(srcChainId: uint16, srcAddress: Bytes[32], payload: Bytes[PAYLOAD_SIZE]): nonpayable
-    def hasStoredPayload(srcChainId: uint16, srcAddress: Bytes[32]) -> bool: view
+    def retryPayload(srcChainId: uint16, srcAddress: Bytes[40], payload: Bytes[PAYLOAD_SIZE]): nonpayable
+    def hasStoredPayload(srcChainId: uint16, srcAddress: Bytes[40]) -> bool: view
     def getSendLibraryAddress(userApplication: address) -> address: view
     def getReceiveLibraryAddress(userApplication: address) -> address: view
     def isSendingPayload() -> bool: view
@@ -44,10 +81,10 @@ interface ILayerZeroEndpoint:
     def setConfig(version: uint16, chainId: uint16, configType: uint256, config: Bytes[CONFIG_SIZE]): nonpayable
     def setSendVersion(version: uint16): nonpayable
     def setReceiveVersion(version: uint16): nonpayable
-    def forceResumeReceive(srcChainId: uint16, srcAddress: Bytes[32]): nonpayable
+    def forceResumeReceive(srcChainId: uint16, srcAddress: Bytes[40]): nonpayable
 
 interface ILayerZeroMessagingLibrary:
-    # def send(_userApplication: address, _lastNonce: uint64, _chainId: uint16, _destination: Bytes[32], _payload: Bytes[1024], refundAddress: address, _zroPaymentAddress: address, _adapterParams: Bytes[1024]): payable
+    # def send(_userApplication: address, _lastNonce: uint64, _chainId: uint16, _destination: Bytes[40], _payload: Bytes[CONFIG_SIZE], refundAddress: address, _zroPaymentAddress: address, _adapterParams: Bytes[CONFIG_SIZE]): payable
     def estimateFees(_chainId: uint16, _userApplication: address, _payload: Bytes[PAYLOAD_SIZE], _payInZRO: bool, _adapterParam: Bytes[CONFIG_SIZE]) -> (uint256, uint256): view
     def setConfig(_chainId: uint16, _userApplication: address, _configType: uint256, _config: Bytes[CONFIG_SIZE]): nonpayable
     def getConfig(_chainId: uint16, _userApplication: address, _configType: uint256) -> Bytes[CONFIG_SIZE]: view
@@ -123,7 +160,7 @@ def _lzSend(_dstChainId: uint16, _payload: Bytes[PAYLOAD_SIZE], _refundAddress: 
     # we will use _abiEncode to encode the arguments to be passed
 
     # encode the arguments
-    payload: Bytes[996] = _abi_encode(_dstChainId, trustedRemote, _payload, _refundAddress, _zroPaymentAddress, _adapterParams, method_id=method_id("send(uint16,bytes,bytes,address,address,bytes)"))
+    payload: Bytes[2404] = _abi_encode(_dstChainId, trustedRemote, _payload, _refundAddress, _zroPaymentAddress, _adapterParams, method_id=method_id("send(uint16,bytes,bytes,address,address,bytes)"))
     # call the function
     raw_call(self.lzEndpoint.address, payload, value=_nativeFee)
 
@@ -169,7 +206,7 @@ def setReceiveVersion(_version: uint16):
     self.lzEndpoint.setReceiveVersion(_version)
 
 @external
-def forceResumeReceive(_srcChainId: uint16, _srcAddress: Bytes[32]):
+def forceResumeReceive(_srcChainId: uint16, _srcAddress: Bytes[40]):
     self.lzEndpoint.forceResumeReceive(_srcChainId, _srcAddress)
 
 @external
@@ -208,6 +245,6 @@ def setMinDstGas(_dstChainId: uint16, _packetType: uint16, _minGas: uint256):
 
 @external
 @view
-def isTrustedRemote(_srcChainId: uint16, _srcAddress: Bytes[32]) -> bool:
+def isTrustedRemote(_srcChainId: uint16, _srcAddress: Bytes[40]) -> bool:
     trustedSource: Bytes[40] = self.trustedRemoteLookup[_srcChainId]
     return keccak256(trustedSource) == keccak256(_srcAddress)

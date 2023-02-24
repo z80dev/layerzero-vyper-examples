@@ -6,13 +6,6 @@ def _nonblockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: u
     # contract body upon cross-chain call goes here
     pass
 
-# vyper implementation of following solidity code
-"""
-    mapping(uint16 => mapping(bytes => mapping(uint64 => bytes32))) public failedMessages;
-
-    event MessageFailed(uint16 _srcChainId, bytes _srcAddress, uint64 _nonce, bytes _payload, bytes _reason);
-    event RetryMessageSuccess(uint16 _srcChainId, bytes _srcAddress, uint64 _nonce, bytes32 _payloadHash);
-"""
 failedMessages: public(HashMap[uint16, HashMap[Bytes[40], HashMap[uint64, bytes32]]])
 
 event MessageFailed:
@@ -36,7 +29,9 @@ def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint
     # call self via raw_call with revert_on_failure=False and max_outsize=256
     # raw_call signature is pasted below
     # raw_call(to: address, data: Bytes, max_outsize: int = 0, gas: uint256 = gasLeft, value: uint256 = 0, is_delegate_call: bool = False, is_static_call: bool = False, revert_on_failure: bool = True)→ Bytes[max_outsize]
-    success = raw_call(self, concat(0x66ad5c8a, _abi_encode(_srcChainId, _srcAddress, _nonce, _payload)), max_outsize=256, revert_on_failure=False)
+    success: bool = False
+    data: Bytes[256] = b""
+    success, data = raw_call(self, concat(0x66ad5c8a, _abi_encode(_srcChainId, _srcAddress, _nonce, _payload)), max_outsize=256, revert_on_failure=False)
     if not success:
         self._storeFailedMessage(_srcChainId, _srcAddress, _nonce, _payload)
 
@@ -45,7 +40,7 @@ def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint
 def _storeFailedMessage(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
     payloadHash: bytes32 = keccak256(_payload)
     self.failedMessages[_srcChainId][_srcAddress][_nonce] = payloadHash
-    log MessageFailed(_srcChainId, _srcAddress, _nonce, _payload, "Failed to send payload")
+    log MessageFailed(_srcChainId, _srcAddress, _nonce, _payload, convert("Failed to send payload", Bytes[100]))
 
 @external
 def nonblockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
