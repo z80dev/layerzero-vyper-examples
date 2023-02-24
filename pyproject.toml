@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "layerzerovyper"
+version = "0.1.0"
+description = ""
+authors = ["z80 <z80@ophy.xyz>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"
+eth-ape = "^0.6.3"
+pytest = "^7.2.1"
+ape-vyper = "^0.6.1"
+ape-solidity = "^0.6.0"
+eth-abi = "^3.0.1"
+asttokens = "^2.2.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.2.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,21 +1,33 @@
-PAYLOAD_SIZE: constant(uint256) = 128
+counter: public(uint256)
 
+PAYLOAD_SIZE: constant(uint256) = 128
+CONFIG_SIZE: constant(uint256) = 512
 
 # filler implementation of _blockingLzReceive
 # body is just a `pass` statement
 @internal
-def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[32], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
-    pass
+def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+    self.counter += 1
+
+# increment counter on other chain by calling _lzSend
+# argument to this fn is _dstChainId of type uint16
+@external
+@payable
+def incrementCounter(_dstChainId: uint16):
+    self._lzSend(_dstChainId, b"", msg.sender, empty(address), b"", msg.value)
+
 
 interface ILayerZeroReceiver:
     def lzReceive(srcChainId: uint16, srcAddress: Bytes[32], nonce: uint64, payload: Bytes[PAYLOAD_SIZE]): nonpayable
+
+implements: ILayerZeroReceiver
 
 interface ILayerZeroEndpoint:
     # def send(dstChainId: uint16, destination: Bytes[32], payload: Bytes[1024], refundAddress: address, zroPaymentAddress: address, adapterParams: Bytes[1024]): payable
     def receivePayload(srcChainId: uint16, srcAddress: Bytes[32], dstAddress: address, nonce: uint64, gasLimit: uint256, payload: Bytes[PAYLOAD_SIZE]): nonpayable
     def getInboundNonce(srcChainId: uint16, srcAddress: Bytes[32]) -> uint64: view
     def getOutboundNonce(dstChainId: uint16, srcAddress: address) -> uint64: view
-    def estimateFees(dstChainId: uint16, userApplication: address, payload: Bytes[PAYLOAD_SIZE], payInZRO: bool, adapterParam: Bytes[1024]) -> (uint256, uint256): view
+    def estimateFees(dstChainId: uint16, userApplication: address, payload: Bytes[PAYLOAD_SIZE], payInZRO: bool, adapterParam: Bytes[CONFIG_SIZE]) -> (uint256, uint256): view
     def getChainId() -> uint16: view
     def retryPayload(srcChainId: uint16, srcAddress: Bytes[32], payload: Bytes[PAYLOAD_SIZE]): nonpayable
     def hasStoredPayload(srcChainId: uint16, srcAddress: Bytes[32]) -> bool: view
@@ -23,19 +35,19 @@ interface ILayerZeroEndpoint:
     def getReceiveLibraryAddress(userApplication: address) -> address: view
     def isSendingPayload() -> bool: view
     def isReceivingPayload() -> bool: view
-    def getConfig(version: uint16, chainId: uint16, userApplication: address, configType: uint256) -> Bytes[1024]: view
+    def getConfig(version: uint16, chainId: uint16, userApplication: address, configType: uint256) -> Bytes[CONFIG_SIZE]: view
     def getSendVersion(userApplication: address) -> uint16: view
     def getReceiveVersion(userApplication: address) -> uint16: view
-    def setConfig(version: uint16, chainId: uint16, configType: uint256, config: Bytes[1024]): nonpayable
+    def setConfig(version: uint16, chainId: uint16, configType: uint256, config: Bytes[CONFIG_SIZE]): nonpayable
     def setSendVersion(version: uint16): nonpayable
     def setReceiveVersion(version: uint16): nonpayable
     def forceResumeReceive(srcChainId: uint16, srcAddress: Bytes[32]): nonpayable
 
 interface ILayerZeroMessagingLibrary:
     # def send(_userApplication: address, _lastNonce: uint64, _chainId: uint16, _destination: Bytes[32], _payload: Bytes[1024], refundAddress: address, _zroPaymentAddress: address, _adapterParams: Bytes[1024]): payable
-    def estimateFees(_chainId: uint16, _userApplication: address, _payload: Bytes[PAYLOAD_SIZE], _payInZRO: bool, _adapterParam: Bytes[1024]) -> (uint256, uint256): view
-    def setConfig(_chainId: uint16, _userApplication: address, _configType: uint256, _config: Bytes[1024]): nonpayable
-    def getConfig(_chainId: uint16, _userApplication: address, _configType: uint256) -> Bytes[1024]: view
+    def estimateFees(_chainId: uint16, _userApplication: address, _payload: Bytes[PAYLOAD_SIZE], _payInZRO: bool, _adapterParam: Bytes[CONFIG_SIZE]) -> (uint256, uint256): view
+    def setConfig(_chainId: uint16, _userApplication: address, _configType: uint256, _config: Bytes[CONFIG_SIZE]): nonpayable
+    def getConfig(_chainId: uint16, _userApplication: address, _configType: uint256) -> Bytes[CONFIG_SIZE]: view
 
 interface ILayerZeroOracle:
     def getPrice(dstChainId: uint16, outboundProofType: uint16) -> uint256: view
@@ -43,8 +55,8 @@ interface ILayerZeroOracle:
     def isApproved(_address: address) -> bool: view
 
 interface ILayerZeroRelayer:
-    def getPrice(dstChainId: uint16, outboundProofType: uint16, userApplication: address, payloadSize: uint256, adapterParams: Bytes[1024]) -> uint256: view
-    def notifyRelayer(dstChainId: uint16, outboundProofType: uint16, adapterParams: Bytes[1024]): nonpayable
+    def getPrice(dstChainId: uint16, outboundProofType: uint16, userApplication: address, payloadSize: uint256, adapterParams: Bytes[CONFIG_SIZE]) -> uint256: view
+    def notifyRelayer(dstChainId: uint16, outboundProofType: uint16, adapterParams: Bytes[CONFIG_SIZE]): nonpayable
     def isApproved(_address: address) -> bool: view
 
 owner: address
@@ -82,7 +94,7 @@ def _onlyOwner():
     assert msg.sender == self.owner
 
 @external
-def _lzReceive(_srcChainId: uint16, _srcAddress: Bytes[32], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
+def lzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint64, _payload: Bytes[PAYLOAD_SIZE]):
     assert msg.sender == self.lzEndpoint.address
     trustedRemote: Bytes[40] = self.trustedRemoteLookup[_srcChainId]
     assert len(_srcAddress) == len(trustedRemote)
@@ -93,7 +105,7 @@ def _lzReceive(_srcChainId: uint16, _srcAddress: Bytes[32], _nonce: uint64, _pay
 
 
 @internal
-def _lzSend(_dstChainId: uint16, _payload: Bytes[PAYLOAD_SIZE], _refundAddress: address, _zroPaymentAddress: address, _adapterParams: Bytes[1024], _nativeFee: uint256):
+def _lzSend(_dstChainId: uint16, _payload: Bytes[PAYLOAD_SIZE], _refundAddress: address, _zroPaymentAddress: address, _adapterParams: Bytes[CONFIG_SIZE], _nativeFee: uint256):
     trustedRemote: Bytes[40] = self.trustedRemoteLookup[_dstChainId]
     assert len(trustedRemote) != 0
     self._checkPayloadSize(_dstChainId, len(_payload))
@@ -108,13 +120,13 @@ def _lzSend(_dstChainId: uint16, _payload: Bytes[PAYLOAD_SIZE], _refundAddress: 
     # we will use _abiEncode to encode the arguments to be passed
 
     # encode the arguments
-    payload: Bytes[2404] = _abi_encode(_dstChainId, trustedRemote, _payload, _refundAddress, _zroPaymentAddress, _adapterParams, method_id=method_id("send(uint16,bytes,bytes,address,address,bytes)"))
+    payload: Bytes[996] = _abi_encode(_dstChainId, trustedRemote, _payload, _refundAddress, _zroPaymentAddress, _adapterParams, method_id=method_id("send(uint16,bytes,bytes,address,address,bytes)"))
     # call the function
     raw_call(self.lzEndpoint.address, payload, value=_nativeFee)
 
 
 @external
-def _checkGasLimit(_dstChainId: uint16, _type: uint16, _adapterParams: Bytes[1024], _extraGas: uint256):
+def _checkGasLimit(_dstChainId: uint16, _type: uint16, _adapterParams: Bytes[CONFIG_SIZE], _extraGas: uint256):
     providedGasLimit: uint256 = self._getGasLimit(_adapterParams)
     minGasLimit: uint256 = self.minDstGasLookup[_dstChainId][_type] + _extraGas
     assert minGasLimit > 0, "LzApp: minGasLimit not set"
@@ -123,7 +135,7 @@ def _checkGasLimit(_dstChainId: uint16, _type: uint16, _adapterParams: Bytes[102
 
 @internal
 @pure
-def _getGasLimit(_adapterParams: Bytes[1024]) -> uint256:
+def _getGasLimit(_adapterParams: Bytes[CONFIG_SIZE]) -> uint256:
     assert len(_adapterParams) >= 34
     return convert(slice(_adapterParams, 34, 32), uint256)
 
@@ -135,11 +147,11 @@ def _checkPayloadSize(_dstChainId: uint16, _payloadSize: uint256):
     assert _payloadSize <= payloadSizeLimit, "LzApp: payload size is too large"
 
 @external
-def getConfig(_version: uint16, _chainId: uint16, _configType: uint256) -> Bytes[1024]:
+def getConfig(_version: uint16, _chainId: uint16, _configType: uint256) -> Bytes[CONFIG_SIZE]:
     return self.lzEndpoint.getConfig(_version, _chainId, self, _configType)
 
 @external
-def setConfig(_version: uint16, _chainId: uint16, _configType: uint256, _config: Bytes[1024]):
+def setConfig(_version: uint16, _chainId: uint16, _configType: uint256, _config: Bytes[CONFIG_SIZE]):
     self._onlyOwner()
     self.lzEndpoint.setConfig(_version, _chainId, _configType, _config)
 
@@ -158,7 +170,7 @@ def forceResumeReceive(_srcChainId: uint16, _srcAddress: Bytes[32]):
     self.lzEndpoint.forceResumeReceive(_srcChainId, _srcAddress)
 
 @external
-def setTrustedRemote(_srcChainId: uint16, _path: Bytes[32]):
+def setTrustedRemote(_srcChainId: uint16, _path: Bytes[40]):
     self._onlyOwner()
     self.trustedRemoteLookup[_srcChainId] = _path
     log SetTrustedRemote(_srcChainId, _path)
