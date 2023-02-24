@@ -9,7 +9,7 @@ def lz_mock(accounts, project):
     lz_mock = project.EndpointMock.deploy(101, sender=accounts[0])
     return lz_mock
 
-def test_lzapp(lz_mock, project, accounts):
+def test_omnicounter(lz_mock, project, accounts):
     lzapp = project.OmniCounter.deploy(lz_mock, sender=accounts[0])
     lzapp2 = project.OmniCounter.deploy(lz_mock, sender=accounts[0])
     assert lzapp.lzEndpoint() == lz_mock.address
