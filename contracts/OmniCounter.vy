@@ -1,8 +1,5 @@
 counter: public(uint256)
 
-PAYLOAD_SIZE: constant(uint256) = 128
-CONFIG_SIZE: constant(uint256) = 512
-
 # filler implementation of _blockingLzReceive
 # body is just a `pass` statement
 @internal
@@ -16,6 +13,12 @@ def _blockingLzReceive(_srcChainId: uint16, _srcAddress: Bytes[40], _nonce: uint
 def incrementCounter(_dstChainId: uint16):
     self._lzSend(_dstChainId, b"", msg.sender, empty(address), b"", msg.value)
 
+################################################################
+#                      LZAPP BOILERPLATE                       #
+################################################################
+
+PAYLOAD_SIZE: constant(uint256) = 128
+CONFIG_SIZE: constant(uint256) = 512
 
 interface ILayerZeroReceiver:
     def lzReceive(srcChainId: uint16, srcAddress: Bytes[32], nonce: uint64, payload: Bytes[PAYLOAD_SIZE]): nonpayable
